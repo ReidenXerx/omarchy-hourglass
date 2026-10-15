@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "reidenxerx.hourglass",
+  "name": "Hourglass",
+  "version": "1.0.0",
+  "author": "ReidenXerx",
+  "license": "MIT",
+  "description": "Screen time for your laptop, the way a phone shows it: today and this week at the laptop, by hour, by category and by app, how often you came back to it, and daily limits that nudge rather than lock. Counts only while you are at the keyboard, keeps only which app was in front, never titles, and never leaves the laptop.",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "shell/Service.qml",
+    "barWidget": "shell/BarWidget.qml",
+    "overlay": "shell/Overlay.qml"
+  },
+  "barWidget": {
+    "displayName": "Hourglass",
+    "description": "Screen time: today and this week by app and category, pick-ups and daily limits",
+    "category": "System",
+    "aliases": [
+      "hourglass",
+      "screen time",
+      "screentime",
+      "usage",
+      "app usage",
+      "digital wellbeing",
+      "limits"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "limits": "",
+      "weeklySummary": true,
+      "idleSeconds": 60
+    },
+    "schema": [
+      {
+        "key": "limits",
+        "type": "string",
+        "label": "Daily limits",
+        "defaultValue": "",
+        "description": "Set them in the panel. Kept here as app:<class>=<minutes> or cat:<category>=<minutes>, separated by semicolons."
+      },
+      {
+        "key": "weeklySummary",
+        "type": "boolean",
+        "label": "Summary on Sunday evening",
+        "defaultValue": true,
+        "description": "A notification after 20:00 on Sunday with the week's total and how it compares with the week before."
+      },
+      {
+        "key": "idleSeconds",
+        "type": "integer",
+        "label": "Stop counting after (seconds without input)",
+        "min": 30,
+        "max": 600,
+        "step": 30,
+        "defaultValue": 60,
+        "description": "How long without a key or the pointer before time stops counting. A film that keeps the screen awake still counts."
+      }
+    ]
+  }
+}
