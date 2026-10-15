@@ -95,7 +95,8 @@ class Details(unittest.TestCase):
         self.assertEqual(saved["det"], {"zed": {"bearing": 3600}})
         w = core.week([dict(saved, d=(DAY - dt.timedelta(days=1)).isoformat())], today, DAY.isoformat())
         self.assertEqual(w["apps"][0]["details"], [{"label": "bearing", "seconds": 7200}])
-        self.assertEqual(core.without_details({"a": "zed", "s": 1, "e": 2, "d": "x"}), {"a": "zed", "s": 1, "e": 2})
+        self.assertEqual(core.without_details({"a": "zed", "s": 1, "e": 2, "d": "x"}, "days"), {"a": "zed", "s": 1, "e": 2})
+        self.assertEqual(core.without_details({"d": "2026-10-16", "t": 5, "det": {}}, "totals"), {"d": "2026-10-16", "t": 5})
 
 
 class Week(unittest.TestCase):
@@ -193,6 +194,36 @@ class Helper(unittest.TestCase):
         day = pathlib.Path(self.tmp.name, "hourglass", "days")
         self.assertNotIn("YouTube", "".join(p.read_text() for p in day.iterdir()))
         self.assertEqual([p.name for p in day.iterdir() if p.name.startswith(".")], [], "no temporary file left")
+
+    def test_forget_details_cleans_the_day_summaries_and_keeps_their_dates(self):
+        totals = pathlib.Path(self.tmp.name, "hourglass", "totals")
+        totals.mkdir(parents=True, mode=0o700)
+        os.chmod(pathlib.Path(self.tmp.name, "hourglass"), 0o700)
+        y = dt.date.today().year
+        row = {"d": f"{y}-01-05", "t": 3600, "p": 3, "apps": {"zed": 3600}, "cats": {"Development": 3600},
+               "det": {"zed": {"secret-project": 3600}}}
+        (totals / f"{y}.jsonl").write_text(json.dumps(row) + "\n")
+        os.chmod(totals / f"{y}.jsonl", 0o600)
+        self.assertEqual(self.run_helper("forget-details").returncode, 0)
+        kept = json.loads((totals / f"{y}.jsonl").read_text())
+        self.assertNotIn("det", kept)
+        self.assertEqual((kept["d"], kept["t"]), (f"{y}-01-05", 3600), "the date and the time stay")
+
+    def test_old_year_summaries_are_pruned(self):
+        import store
+        os.environ["XDG_STATE_HOME"] = self.tmp.name
+        try:
+            for name in ("2019.jsonl", f"{dt.date.today().year}.jsonl"):
+                store.append("totals", name, {"d": "x"})
+            self.assertEqual(store.prune("totals", 800, dt.date.today()), 1)
+        finally:
+            os.environ.pop("XDG_STATE_HOME", None)
+
+    def test_a_limit_notice_is_remembered_across_restarts(self):
+        self.assertEqual(self.run_helper("told", "app:cs2|done").returncode, 0)
+        self.assertEqual(self.run_helper("told", "app:cs2|done").returncode, 0)
+        self.assertEqual(json.loads(self.run_helper("report").stdout)["told"], ["app:cs2|done"])
+        self.assertEqual(self.run_helper("told", "rm -rf|done").returncode, 1)
 
     def test_probe_refuses_nonsense_and_says_nothing_for_a_stranger(self):
         self.assertEqual(self.run_helper("probe", "abc").returncode, 1)

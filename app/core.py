@@ -223,7 +223,8 @@ def week(totals: list[dict], today: dict, today_key: str) -> dict:
     return {
         "days": [{"d": d, "seconds": by_day.get(d, {"t": 0})["t"]} for d in days],
         "total": this_total,
-        "previous": sum(prev) if prev else None,
+        # Compared only with a whole week: against two days of history every week looks enormous.
+        "previous": sum(prev) if len(prev) == 7 else None,
         "pickups": sum(by_day.get(d, {"p": 0})["p"] for d in days),
         "apps": [{"app": a, "seconds": s, "details": significant(det.get(a, {}), s)}
                  for a, s in sorted(apps.items(), key=lambda kv: -kv[1])[:12]],
@@ -231,11 +232,13 @@ def week(totals: list[dict], today: dict, today_key: str) -> dict:
     }
 
 
-def without_details(obj):
-    """A stored record with its detail taken out, for "Forget details"."""
-    if isinstance(obj, dict):
-        return {k: v for k, v in obj.items() if k not in ("d", "det")}
-    return obj
+def without_details(obj, sub: str):
+    """A stored record with its details taken out, for "Forget details": the label "d" of a stretch in days/, the
+    "det" of a day summary in totals/ (where "d" is the date and stays)."""
+    if not isinstance(obj, dict):
+        return obj
+    drop = "d" if sub == "days" else "det"
+    return {k: v for k, v in obj.items() if k != drop}
 
 
 def parse_limits(text) -> list[dict]:

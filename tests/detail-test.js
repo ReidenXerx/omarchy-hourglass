@@ -34,12 +34,21 @@ test("GitHub is described by repository", () => {
 })
 
 test("an unknown title falls back to its last short part, or to Other sites", () => {
-  eq(M.label("brave-browser", "Release notes | Omarchy - Brave", []), "Omarchy")
+  eq(M.label("brave-browser", "Release notes | omarchy.org - Brave", []), "omarchy.org")
+  eq(M.label("brave-browser", "Release notes | Omarchy - Brave", []), "Other sites", "a word is not a host name")
   eq(M.label("brave-browser", "a page with no site in its title at all - Brave", []), "Other sites")
+  eq(M.label("brave-browser", "Reset your password - alice@example.com - Brave", []), "Other sites")
+  eq(M.label("brave-browser", "Dr Smith - Test results - Patient Portal - Brave", []), "Other sites")
+  eq(M.label("brave-browser", "(3) Lofi beats - YouTube - Brave", ["YouTube"]), "YouTube: Lofi beats")
+  eq(M.label("brave-browser", "Something without a browser name", []), "", "not a page it can read")
 })
 
 test("private windows and password managers are never described", () => {
   eq(M.label("brave-browser", "New Tab - Brave (Private)", ["YouTube"]), "")
+  for (const t of ["Lofi - YouTube - Google Chrome (Incognito)", "GitHub - owner/secret: x — Mozilla Firefox (Private Browsing)",
+                   "Page - InPrivate - Microsoft Edge", "Page - YouTube - Brave (Private with Tor)",
+                   "GitHub - owner/secret-repo: d - Google Chrome (Incognito)"])
+    eq(M.label("brave-browser", t, ["GitHub", "YouTube"]), "")
   eq(M.label("firefox", "Something — Mozilla Firefox Private Browsing", []), "")
   eq(M.isPrivate("firefox", "Something — Mozilla Firefox Private Browsing"), true)
   eq(M.label("Bitwarden", "Bitwarden", []), "")
@@ -48,6 +57,7 @@ test("private windows and password managers are never described", () => {
 
 test("editors give their project; terminals and other apps give nothing here", () => {
   eq(M.label("dev.zed.Zed", "Service.qml — reidenxerx.dusk", []), "reidenxerx.dusk")
+  eq(M.label("dev.zed.Zed", "passwords.txt", []), "", "one part is a file, not a project")
   eq(M.label("code", "main.rs - bearing - Visual Studio Code", []), "bearing")
   eq(M.label("foot", "◐ omarchy-dev", []), "", "the helper reads what runs in a terminal")
   eq(M.label("steam", "Steam", []), "")

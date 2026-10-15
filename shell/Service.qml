@@ -14,6 +14,15 @@ import "DetailModel.js" as Detail
 Item {
   id: hourglass
 
+  // A helper call that has not finished in ten seconds is stopped. One per process, so one call never extends
+  // another's deadline.
+  component Deadline: Timer {
+    property var target: null
+    interval: 10000
+    running: target !== null && target.running
+    onTriggered: if (target && target.running) target.signal(9)
+  }
+
   property var shell: null
   property var manifest: null
   readonly property string pluginId: "reidenxerx.hourglass"
@@ -117,13 +126,11 @@ Item {
 
   function probeTerminal() {
     if (!hourglass.describable || hourglass.kind !== "terminal" || prober.running) return
-    Hyprland.refreshToplevels()
     var top = Hyprland.activeToplevel
     var pid = top && top.lastIpcObject ? Number(top.lastIpcObject.pid) : 0
     if (!(pid > 0)) { hourglass.terminalLabel = ""; return }
     prober.command = ["/usr/bin/python3", "-I", hourglass.helper, "probe", String(Math.floor(pid))]
     prober.running = true
-    deadline.restart()
   }
 
   Process {
@@ -145,9 +152,11 @@ Item {
   }
 
   function forgetDetails() {
+    // What is still waiting to be written goes without its labels too.
+    hourglass.pending = hourglass.pending.map(function (r) { var c = Object.assign({}, r); delete c.d; return c })
+    if (hourglass.current) hourglass.current = { app: hourglass.current.app, start: hourglass.current.start, d: "" }
     if (forgetter.running) return
     forgetter.running = true
-    deadline.restart()
   }
 
   Process {
@@ -197,9 +206,24 @@ Item {
 
   onAppClassChanged: {
     var now = Date.now()
-    hourglass.terminalLabel = ""
     hourglass.closeAt(now)
     hourglass.openAt(now)
+  }
+
+  // Another window, even of the same terminal, may run something else: its label is read again, once Hyprland's
+  // list of windows has caught up with the focus change.
+  onFocusedChanged: {
+    hourglass.terminalLabel = ""
+    if (hourglass.kind === "terminal") {
+      Hyprland.refreshToplevels()
+      probeSoon.restart()
+    }
+  }
+
+  Timer {
+    id: probeSoon
+    interval: 400
+    onTriggered: hourglass.probeTerminal()
   }
 
   onAwayChanged: {
@@ -215,23 +239,26 @@ Item {
     }
   }
 
-  // A clock that jumped means the laptop slept: the stretch ended when it went down.
+  // A clock that jumped means the laptop slept: the stretch ended when it went down. Checked by its own timer and
+  // first thing in every flush, so after a resume the flush can never be the one that counts the sleep.
+  function checkClock() {
+    var now = Date.now()
+    if (now - hourglass.lastTick > 60000) {
+      hourglass.closeAt(hourglass.lastTick)
+      if (hourglass.awaySince === 0) hourglass.awaySince = hourglass.lastTick
+      if (!hourglass.away) {
+        hourglass.back(now)
+        hourglass.openAt(now)
+      }
+    }
+    hourglass.lastTick = now
+  }
+
   Timer {
     interval: 15000
     repeat: true
     running: true
-    onTriggered: {
-      var now = Date.now()
-      if (now - hourglass.lastTick > 60000) {
-        hourglass.closeAt(hourglass.lastTick)
-        if (hourglass.awaySince === 0) hourglass.awaySince = hourglass.lastTick
-        if (!hourglass.away) {
-          hourglass.back(now)
-          hourglass.openAt(now)
-        }
-      }
-      hourglass.lastTick = now
-    }
+    onTriggered: hourglass.checkClock()
   }
 
   // ---------------------------------------------------------------- handing it to the helper
@@ -244,23 +271,28 @@ Item {
   }
 
   function flush() {
-    // Cut the stretch in progress, so a shell restart loses at most a minute.
+    hourglass.checkClock()
+    // Cut the stretch in progress, so a shell restart loses at most a minute. Cut where you were surely here: the
+    // last idle timeout of it may yet turn out to have been idle, and is left in the stretch that goes on.
     if (hourglass.current) {
-      var now = Date.now()
-      var app = hourglass.current.app
-      hourglass.closeAt(now)
-      if (!hourglass.away && app === hourglass.appClass) hourglass.current = { app: app, start: now, d: hourglass.detailLabel }
+      var cut = Date.now() - hourglass.idleSeconds * 1000
+      if (cut > hourglass.current.start) {
+        var keep = hourglass.current
+        hourglass.closeAt(cut)
+        hourglass.current = { app: keep.app, start: cut, d: keep.d }
+      }
     }
     if (hourglass.pending.length === 0 || adder.running) return
-    adder.payload = JSON.stringify(hourglass.pending.slice(0, 2000))
-    hourglass.pending = []
+    adder.batch = hourglass.pending.slice(0, 2000)
+    hourglass.pending = hourglass.pending.slice(2000)
+    adder.payload = JSON.stringify(adder.batch)
     adder.running = true
-    deadline.restart()
   }
 
   Process {
     id: adder
     property string payload: ""
+    property var batch: []
     command: ["/usr/bin/python3", "-I", hourglass.helper, "add"]
     clearEnvironment: true
     environment: hourglass.helperEnv
@@ -269,7 +301,12 @@ Item {
       adder.write(adder.payload + "\n")
       adder.payload = ""
     }
-    onExited: function (code) { if (hourglass.panelOpen) hourglass.refresh() }
+    onExited: function (code) {
+      // A batch the helper did not take is kept for the next flush, not lost.
+      if (code !== 0) hourglass.pending = adder.batch.concat(hourglass.pending).slice(0, 5000)
+      adder.batch = []
+      if (hourglass.panelOpen) hourglass.refresh()
+    }
   }
 
   // ---------------------------------------------------------------- reports
@@ -281,7 +318,6 @@ Item {
     if (reporter.running) return
     reporter.command = ["/usr/bin/python3", "-I", hourglass.helper, "report", "--limits", hourglass.limits]
     reporter.running = true
-    deadline.restart()
   }
 
   Process {
@@ -299,16 +335,11 @@ Item {
     }
   }
 
-  // Any helper call that has not finished in ten seconds is stopped.
-  Timer {
-    id: deadline
-    interval: 10000
-    onTriggered: {
-      if (adder.running) adder.signal(9)
-      if (reporter.running) reporter.signal(9)
-      if (weekly.running) weekly.signal(9)
-    }
-  }
+  Deadline { target: adder }
+  Deadline { target: reporter }
+  Deadline { target: weekly }
+  Deadline { target: prober }
+  Deadline { target: forgetter }
 
   // Today's total for the bar: the last report, plus the stretch in progress.
   property double nowMs: Date.now()
@@ -316,6 +347,13 @@ Item {
     var base = hourglass.report ? hourglass.report.today.total : 0
     var live = hourglass.current ? Math.max(0, (hourglass.nowMs - hourglass.current.start) / 1000) : 0
     return Math.round(base + live)
+  }
+
+  Timer {
+    interval: 30000
+    repeat: true
+    running: true
+    onTriggered: hourglass.nowMs = Date.now()
   }
 
   Timer {
@@ -334,13 +372,28 @@ Item {
 
   // ---------------------------------------------------------------- limits and the weekly summary
 
-  // Which limits have been told about today: "key|five" and "key|done", reset at midnight.
-  PersistentProperties {
-    id: told
-    reloadableId: "reidenxerx.hourglass.told"
-    property string day: ""
-    property string keys: ""
+  // Which limit notices were given today: kept by the helper on disk (so a restart does not repeat them), and here
+  // until the next report includes them.
+  property var toldNow: []
+
+  function wasTold(key) {
+    var onDisk = hourglass.report && Array.isArray(hourglass.report.told) ? hourglass.report.told : []
+    return onDisk.indexOf(key) >= 0 || hourglass.toldNow.indexOf(key) >= 0
   }
+
+  function tell(key, title, body) {
+    hourglass.toldNow = hourglass.toldNow.concat([key])
+    teller.command = ["/usr/bin/python3", "-I", hourglass.helper, "told", key]
+    if (!teller.running) teller.running = true
+    hourglass.notify(title, body)
+  }
+
+  Process {
+    id: teller
+    clearEnvironment: true
+    environment: hourglass.helperEnv
+  }
+  Deadline { target: teller }
 
   readonly property bool limitClose: {
     var list = hourglass.report ? hourglass.report.limits : []
@@ -349,19 +402,14 @@ Item {
   }
 
   function checkLimits() {
-    var today = new Date().toDateString()
-    if (told.day !== today) { told.day = today; told.keys = "" }
     var list = hourglass.report ? hourglass.report.limits : []
     for (var i = 0; i < list.length; i++) {
       var x = list[i]
       var id = x.kind + ":" + x.key
-      if (x.left <= 0 && told.keys.indexOf(id + "|done;") < 0) {
-        told.keys += id + "|done;"
-        hourglass.notify("Time is up for " + x.name, "You set " + x.minutes + " minutes a day for it.")
-      } else if (x.left > 0 && x.left <= 300 && told.keys.indexOf(id + "|five;") < 0) {
-        told.keys += id + "|five;"
-        hourglass.notify("Five minutes left for " + x.name, "Of the " + x.minutes + " minutes a day you set.")
-      }
+      if (x.left <= 0 && !hourglass.wasTold(id + "|done"))
+        hourglass.tell(id + "|done", "Time is up for " + x.name, "You set " + x.minutes + " minutes a day for it.")
+      else if (x.left > 0 && x.left <= 300 && !hourglass.wasTold(id + "|five"))
+        hourglass.tell(id + "|five", "Five minutes left for " + x.name, "Of the " + x.minutes + " minutes a day you set.")
     }
   }
 

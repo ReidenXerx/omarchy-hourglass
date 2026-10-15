@@ -595,12 +595,14 @@ Item {
                 onClicked: overlay.toggleSite(modelData)
               }
             }
-            Button {
-              text: "Forget details"
-              foreground: overlay.faint
-              accent: overlay.accent
-              onClicked: overlay.hourglass.forgetDetails()
-            }
+          }
+
+          // Always here, so details can be switched off first and then forgotten.
+          Button {
+            text: "Forget details"
+            foreground: overlay.faint
+            accent: overlay.accent
+            onClicked: overlay.hourglass.forgetDetails()
           }
 
           Text {
@@ -609,7 +611,7 @@ Item {
             wrapMode: Text.Wrap
             text: overlay.hourglass && overlay.hourglass.details
               ? "Details are short labels such as YouTube, a project in your editor or what runs in a terminal, never a window's title. Private windows and password managers are never described."
-              : "Only which app was in front and for how long is kept, on this laptop: never window titles, never pages."
+              : "Only which app was in front, for how long, and when you came back is kept, on this laptop: never window titles, never pages."
             color: overlay.faint
             font.family: Style.font.family
             font.pixelSize: Style.font.caption

@@ -8,6 +8,7 @@
                                 Sunday 20:00, and nothing after that until next week
   hourglass probe PID           print what runs in the terminal window whose process is PID
   hourglass forget-details      take every detail label out of the history, keeping the times
+  hourglass told KEY            remember that the notice KEY was given today, so a restart does not repeat it
 """
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ import store  # noqa: E402
 import terminal  # noqa: E402
 
 STDIN_MAX = 256 * 1024
+re_key = __import__("re").compile(r"^(app|cat):[A-Za-z0-9 ._+:@-]{1,64}\|(five|done)$")
 KEEP_DAYS = 30
 SUMMARY_DAYS = 40      # how far back a missing day summary is filled in
 
@@ -116,8 +118,10 @@ def report(limits_text: str) -> int:
     limits = core.limit_use(core.parse_limits(limits_text), day)
     for x in limits:
         x["name"] = resolve(x["key"])["name"] if x["kind"] == "app" else x["key"]
+    told = sorted({r["k"] for r in store.read_lines("state", "told.jsonl", 256 * 1024)
+                   if isinstance(r, dict) and r.get("d") == today.isoformat() and isinstance(r.get("k"), str)})[:100]
     out = {"now": int(now), "today": day, "average": round(avg) if avg is not None else None, "week": w,
-           "limits": limits, "categories": core.CATEGORIES}
+           "limits": limits, "categories": core.CATEGORIES, "told": told}
     print(json.dumps(out, separators=(",", ":"), ensure_ascii=True))
     return 0
 
@@ -133,10 +137,13 @@ def weekly() -> int:
         return 0
     today = d.date()
     start = int(dt.datetime.combine(today, dt.time()).timestamp())
-    day = core.summarise_day(day_records(today, now), start, int(now) + 1, apps.Resolver())
+    resolve = apps.Resolver()
+    day = core.summarise_day(day_records(today, now), start, int(now) + 1, resolve)
     w = core.week(all_totals(now), day, today.isoformat())
     if w["total"] <= 0:
         return 0
+    for a in w["apps"]:
+        a["app"] = resolve(a["app"])["name"]
     store.append("state", "weekly.jsonl", {"w": week_id})
     print(core.weekly_text(w))
     return 0
@@ -144,10 +151,22 @@ def weekly() -> int:
 
 def forget_details() -> int:
     for sub in ("days", "totals"):
+        key = "d" if sub == "days" else "det"
         for name in store.names(sub):
-            rows = store.read_lines(sub, name)
-            if any(isinstance(r, dict) and ("d" in r or "det" in r) for r in rows):
-                store.rewrite(sub, name, [core.without_details(r) for r in rows])
+            rows = store.read_lines(sub, name, 2 * 1024 * 1024 if sub == "totals" else store.DAY_MAX)
+            if any(isinstance(r, dict) and key in r for r in rows):
+                store.rewrite(sub, name, [core.without_details(r, sub) for r in rows])
+    return 0
+
+
+def told(key: str) -> int:
+    if not re_key.match(key):
+        return 1
+    today = dt.date.today().isoformat()
+    rows = store.read_lines("state", "told.jsonl", 256 * 1024)
+    kept = [r for r in rows if isinstance(r, dict) and r.get("d") == today]
+    if not any(r.get("k") == key for r in kept):
+        store.rewrite("state", "told.jsonl", kept[-200:] + [{"d": today, "k": key}])
     return 0
 
 
@@ -168,7 +187,11 @@ def main(argv: list[str]) -> int:
     pr = sub.add_parser("probe")
     pr.add_argument("pid")
     sub.add_parser("forget-details")
+    tl = sub.add_parser("told")
+    tl.add_argument("key")
     args = parser.parse_args(argv)
+    if args.cmd == "told":
+        return told(args.key[:120])
     if args.cmd == "probe":
         return probe(args.pid)
     if args.cmd == "forget-details":

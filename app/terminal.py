@@ -68,10 +68,33 @@ def _folder(pid: int) -> str:
     return name[:40] if name and name.isprintable() else ""
 
 
+# ssh options that take a value, so the value is not mistaken for the destination.
+SSH_VALUE_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
+
+
+def ssh_host(args: list[str]) -> str:
+    """The host of an ssh command line (after its options; user@ dropped), or ""."""
+    i = 1
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if a.startswith("-") and len(a) > 1:
+            if a[-1] in SSH_VALUE_OPTS and len(a) == 2:
+                i += 2
+            else:
+                i += 1
+            continue
+        break
+    if i >= len(args):
+        return ""
+    host = args[i].split("@")[-1]
+    return host if HOST_RE.match(host) else ""
+
+
 def _ssh_host(pid: int) -> str:
-    args = _read(f"/proc/{pid}/cmdline", 4096).split("\0")
-    hosts = [a for a in args[1:] if a and not a.startswith("-") and HOST_RE.match(a)]
-    return hosts[0].split("@")[-1] if hosts else ""
+    return ssh_host(_read(f"/proc/{pid}/cmdline", 4096).split("\0"))
 
 
 def describe(terminal_pid: int) -> str:

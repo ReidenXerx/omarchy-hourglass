@@ -13,8 +13,9 @@ nudge rather than lock.
   still counts, because you are watching it.
 - **Categories like a phone's, from your own apps.** Development, Web, Social,
   Games, Entertainment, Creativity, Productivity, Utilities: worked out from
-  each app's desktop entry, the same file your launcher reads, so nothing is
-  guessed and nothing is looked up online.
+  each app's desktop entry, the same file your launcher reads (with a short
+  built-in list for terminals and games that ship none), and nothing is looked
+  up online.
 - **Pick-ups.** Coming back after five minutes away (idle, locked or asleep)
   counts as one, with the first of the day and the busiest hour.
 - **Limits that nudge.** A daily allowance for an app or a whole category, with

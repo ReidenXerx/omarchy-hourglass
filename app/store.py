@@ -15,7 +15,8 @@ import stat
 
 DAY_MAX = 4 * 1024 * 1024       # one day's file: a stretch is ~60 bytes, so this is far above any real day
 HEALTH_MAX = 1024 * 1024
-DATED = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?\.jsonl$")
+# Day files (2026-10-16.jsonl), month files (2026-10.jsonl) and year files (2026.jsonl).
+DATED = re.compile(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?\.jsonl$")
 
 
 class Unsafe(Exception):
@@ -157,7 +158,7 @@ def read_lines(sub: str, name: str, ceiling: int = DAY_MAX) -> list:
     for line in raw.decode("utf-8", "replace").splitlines():
         try:
             out.append(json.loads(line))
-        except ValueError:
+        except (ValueError, RecursionError):       # a torn line, or one nested past what json can take
             continue
     return out
 
@@ -182,7 +183,8 @@ def prune(sub: str, keep_days: int, today: dt.date) -> int:
             m = DATED.match(name)
             if not m:
                 continue
-            y, mo, da = int(m.group(1)), int(m.group(2)), int(m.group(3) or 28)
+            # A month or year file is as old as its last day.
+            y, mo, da = int(m.group(1)), int(m.group(2) or 12), int(m.group(3) or 28)
             try:
                 when = dt.date(y, mo, da)
             except ValueError:

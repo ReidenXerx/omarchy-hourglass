@@ -54,11 +54,17 @@ function kind(appClass) {
   return "other"
 }
 
-// A browser title without the browser's own name; null for a private window, which is never described.
+var BROWSER_SUFFIX = /\s+[-—–]\s+(Brave|Mozilla Firefox|Firefox|Chromium|Google Chrome|Zen Browser|Vivaldi|LibreWolf|Microsoft Edge|Web)(\s*\([^()]{0,40}\))?\s*$/
+var PRIVATE = /private browsing|incognito|inprivate|\(private|private window|with tor|[-—–]\s*private\s*$/i
+
+// A browser title without the browser's own name. null when nothing may be said about it: a private window
+// (whatever its browser calls one, wherever in the title it says so), or a title without a browser's name at its
+// end, which is not a page Hourglass can read safely.
 function pageTitle(title) {
   var t = String(title || "")
-  if (/(Private Browsing|Incognito|\(Private\)|Private Window|- Private)\s*$/i.test(t)) return null
-  return t.replace(/\s+[-—–]\s+(Brave|Mozilla Firefox|Firefox|Chromium|Google Chrome|Zen Browser|Vivaldi|LibreWolf|Microsoft Edge|Web)\s*$/, "")
+  if (PRIVATE.test(t)) return null
+  if (!BROWSER_SUFFIX.test(t)) return null
+  return t.replace(BROWSER_SUFFIX, "").replace(/^\(\d+\)\s+/, "")     // "(3) " is a notification count, not the page
 }
 
 // { site, page } for a page title. GitHub writes its repository first ("owner/repo: description · GitHub" or
@@ -72,11 +78,13 @@ function site(page) {
     var m = SITES[i][0].exec(p)
     if (m) return { site: SITES[i][1].replace("$1", m[1] || ""), page: p.slice(0, m.index) }
   }
-  // Otherwise the last short " - " or " | " part, when there is one, is very likely the site.
+  // Otherwise only a last part shaped like a host name ("omarchy.org") is taken for the site. Any other piece of a
+  // title could be a person, an address or a file, so it is not kept.
   var parts = p.split(/ [|—–-] /)
   if (parts.length >= 2) {
-    var last = parts[parts.length - 1].trim()
-    if (last.length >= 2 && last.length <= 30) return { site: last, page: parts.slice(0, -1).join(" - ") }
+    var last = parts[parts.length - 1].trim().toLowerCase()
+    if (/^(?:[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?\.)+[a-z]{2,12}$/.test(last) && last.length <= 40)
+      return { site: last, page: parts.slice(0, -1).join(" - ") }
   }
   return { site: "", page: p }
 }
@@ -84,8 +92,9 @@ function site(page) {
 // Zed and VS Code put the project in the title: "file — project" or "file - project - Visual Studio Code".
 function project(appClass, title) {
   var t = String(title || "").replace(/\s+[-—–]\s+(Visual Studio Code|VSCodium|Cursor|Code - OSS)\s*$/, "")
+  // Only "file — project": a title of one part is a file name or a dialog, never kept.
   var parts = t.split(/ [—–-] /)
-  return parts.length >= 2 ? parts[parts.length - 1].trim() : (lower(appClass).indexOf("zed") >= 0 ? t.trim() : "")
+  return parts.length >= 2 ? parts[parts.length - 1].trim() : ""
 }
 
 // The label for a window, or "" for none. `pageSites` are the sites whose pages you chose to keep.
