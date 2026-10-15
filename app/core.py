@@ -15,6 +15,19 @@ STRETCH_MAX = 3600          # the service flushes every minute, so a longer stre
 MERGE_GAP = 10              # seconds between two stretches of one app that still count as one sitting
 CATEGORIES = ["Development", "Web", "Social", "Games", "Entertainment", "Creativity", "Productivity", "Utilities", "Other"]
 APP_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+:@-]{0,63}$")
+LABEL_MAX = 60
+DETAIL_MIN = 600            # a detail is shown from ten minutes,
+DETAIL_SHARE = 0.10         # or a tenth of its app's time,
+DETAIL_FLOOR = 120          # but never for less than two minutes
+DETAILS_SHOWN = 5
+
+
+def clean_label(text) -> str:
+    """A detail label as the service sent it: printable, one line, short. "" when it is not one."""
+    if not isinstance(text, str):
+        return ""
+    s = "".join(ch for ch in text if ch.isprintable()).strip()
+    return s if 0 < len(s) <= LABEL_MAX + 1 else ""
 
 
 def clean_app(name) -> str:
@@ -36,7 +49,24 @@ def read_stretch(obj, now: float):
         return None
     if not 0 < e - s <= STRETCH_MAX or e > now + 120:
         return None
-    return {"a": a, "s": s, "e": e}
+    out = {"a": a, "s": s, "e": e}
+    d = clean_label(obj.get("d"))
+    if d:
+        out["d"] = d
+    return out
+
+
+def significant(details: dict[str, int], app_seconds: int) -> list[dict]:
+    """The details worth showing for an app: ten minutes or a tenth of its time (never under two minutes), the
+    five biggest, and the rest as one "Other" line when anything was shown."""
+    ranked = sorted(details.items(), key=lambda kv: (-kv[1], kv[0]))
+    shown = [{"label": k, "seconds": v} for k, v in ranked
+             if v >= DETAIL_FLOOR and (v >= DETAIL_MIN or v >= DETAIL_SHARE * app_seconds)][:DETAILS_SHOWN]
+    if shown:
+        rest = app_seconds - sum(x["seconds"] for x in shown)
+        if rest >= DETAIL_FLOOR:
+            shown.append({"label": "Other", "seconds": rest})
+    return shown
 
 
 # ---------------------------------------------------------------- days
@@ -68,6 +98,7 @@ def summarise_day(records: list[dict], start: int, end: int, resolve) -> dict:
     {"name", "category"} for an app class."""
     hours = [0] * 24
     apps: dict[str, int] = {}
+    details: dict[str, dict[str, int]] = {}
     pickups = []
     stretches = []
     for r in records:
@@ -80,6 +111,9 @@ def summarise_day(records: list[dict], start: int, end: int, resolve) -> dict:
             continue
         stretches.append((r["a"], s, e))
         apps[r["a"]] = apps.get(r["a"], 0) + (e - s)
+        if r.get("d"):
+            per = details.setdefault(r["a"], {})
+            per[r["d"]] = per.get(r["d"], 0) + (e - s)
         for hour, seconds in split_hours(s, e):
             hours[hour] += seconds
     cats: dict[str, int] = {}
@@ -87,7 +121,8 @@ def summarise_day(records: list[dict], start: int, end: int, resolve) -> dict:
     for app, seconds in sorted(apps.items(), key=lambda kv: -kv[1]):
         info = resolve(app)
         cats[info["category"]] = cats.get(info["category"], 0) + seconds
-        listed.append({"app": app, "name": info["name"], "category": info["category"], "seconds": seconds})
+        listed.append({"app": app, "name": info["name"], "category": info["category"], "seconds": seconds,
+                       "details": significant(details.get(app, {}), seconds), "raw": details.get(app, {})})
     pick_hours = [0] * 24
     for p in pickups:
         pick_hours[dt.datetime.fromtimestamp(p).hour] += 1
@@ -119,9 +154,17 @@ def longest_sitting(stretches: list[tuple[str, int, int]]) -> dict | None:
 
 def day_totals(summary: dict, date: str) -> dict:
     """What is kept of a day for a year: its total, top apps, categories and pick-ups."""
-    return {"d": date, "t": summary["total"], "p": summary["pickups"],
-            "apps": {a["app"]: a["seconds"] for a in summary["apps"][:12]},
-            "cats": {c["name"]: c["seconds"] for c in summary["categories"]}}
+    det = {}
+    for a in summary["apps"][:12]:
+        top = dict(sorted(a.get("raw", {}).items(), key=lambda kv: -kv[1])[:8])
+        if top:
+            det[a["app"]] = top
+    out = {"d": date, "t": summary["total"], "p": summary["pickups"],
+           "apps": {a["app"]: a["seconds"] for a in summary["apps"][:12]},
+           "cats": {c["name"]: c["seconds"] for c in summary["categories"]}}
+    if det:
+        out["det"] = det
+    return out
 
 
 def read_totals(obj) -> dict | None:
@@ -134,7 +177,15 @@ def read_totals(obj) -> dict | None:
             if clean_app(k) and isinstance(v, int) and 0 <= v <= 86400} if isinstance(obj.get("apps"), dict) else {}
     cats = {k: v for k, v in (obj.get("cats") or {}).items()
             if k in CATEGORIES and isinstance(v, int) and 0 <= v <= 86400} if isinstance(obj.get("cats"), dict) else {}
-    return {"d": obj["d"], "t": t, "p": p, "apps": apps, "cats": cats}
+    det = {}
+    if isinstance(obj.get("det"), dict):
+        for app, per in list(obj["det"].items())[:12]:
+            if clean_app(app) and isinstance(per, dict):
+                kept = {clean_label(k): v for k, v in list(per.items())[:8]
+                        if clean_label(k) and isinstance(v, int) and 0 <= v <= 86400}
+                if kept:
+                    det[clean_app(app)] = kept
+    return {"d": obj["d"], "t": t, "p": p, "apps": apps, "cats": cats, "det": det}
 
 
 # ---------------------------------------------------------------- the week, averages and limits
@@ -150,7 +201,8 @@ def week(totals: list[dict], today: dict, today_key: str) -> dict:
     by_day = {x["d"]: x for x in totals}
     by_day[today_key] = {"d": today_key, "t": today["total"], "p": today["pickups"],
                          "apps": {a["app"]: a["seconds"] for a in today["apps"]},
-                         "cats": {c["name"]: c["seconds"] for c in today["categories"]}}
+                         "cats": {c["name"]: c["seconds"] for c in today["categories"]},
+                         "det": {a["app"]: a.get("raw", {}) for a in today["apps"] if a.get("raw")}}
     end = dt.date.fromisoformat(today_key)
     days = [(end - dt.timedelta(days=k)).isoformat() for k in range(6, -1, -1)]
     before = [(end - dt.timedelta(days=k)).isoformat() for k in range(13, 6, -1)]
@@ -158,9 +210,14 @@ def week(totals: list[dict], today: dict, today_key: str) -> dict:
     prev = [by_day[d]["t"] for d in before if d in by_day]
     apps: dict[str, int] = {}
     cats: dict[str, int] = {}
+    det: dict[str, dict[str, int]] = {}
     for d in days:
         for a, s in by_day.get(d, {}).get("apps", {}).items():
             apps[a] = apps.get(a, 0) + s
+        for a, per in by_day.get(d, {}).get("det", {}).items():
+            into = det.setdefault(a, {})
+            for k, v in per.items():
+                into[k] = into.get(k, 0) + v
         for c, s in by_day.get(d, {}).get("cats", {}).items():
             cats[c] = cats.get(c, 0) + s
     return {
@@ -168,9 +225,17 @@ def week(totals: list[dict], today: dict, today_key: str) -> dict:
         "total": this_total,
         "previous": sum(prev) if prev else None,
         "pickups": sum(by_day.get(d, {"p": 0})["p"] for d in days),
-        "apps": [{"app": a, "seconds": s} for a, s in sorted(apps.items(), key=lambda kv: -kv[1])[:12]],
+        "apps": [{"app": a, "seconds": s, "details": significant(det.get(a, {}), s)}
+                 for a, s in sorted(apps.items(), key=lambda kv: -kv[1])[:12]],
         "categories": [{"name": c, "seconds": s} for c, s in sorted(cats.items(), key=lambda kv: -kv[1])],
     }
+
+
+def without_details(obj):
+    """A stored record with its detail taken out, for "Forget details"."""
+    if isinstance(obj, dict):
+        return {k: v for k, v in obj.items() if k not in ("d", "det")}
+    return obj
 
 
 def parse_limits(text) -> list[dict]:

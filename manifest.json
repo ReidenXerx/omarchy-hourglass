@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "reidenxerx.hourglass",
   "name": "Hourglass",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "ReidenXerx",
   "license": "MIT",
-  "description": "Screen time for your laptop, the way a phone shows it: today and this week at the laptop, by hour, by category and by app, how often you came back to it, and daily limits that nudge rather than lock. Counts only while you are at the keyboard, keeps only which app was in front, never titles, and never leaves the laptop.",
+  "description": "Screen time for your laptop, the way a phone shows it: today and this week at the laptop, by hour, by category and by app, how often you came back to it, and daily limits that nudge rather than lock. Counts only while you are at the keyboard. If you turn details on, it also says what you did in each app, as short labels such as YouTube, a project in your editor or what runs in a terminal; never raw window titles, never private windows. Nothing leaves the laptop.",
   "kinds": [
     "service",
     "bar-widget",
@@ -35,7 +35,10 @@
     "defaults": {
       "limits": "",
       "weeklySummary": true,
-      "idleSeconds": 60
+      "idleSeconds": 60,
+      "details": false,
+      "pageSites": "",
+      "neverApps": ""
     },
     "schema": [
       {
@@ -61,6 +64,27 @@
         "step": 30,
         "defaultValue": 60,
         "description": "How long without a key or the pointer before time stops counting. A film that keeps the screen awake still counts."
+      },
+      {
+        "key": "details",
+        "type": "boolean",
+        "label": "Remember what you did in each app",
+        "defaultValue": false,
+        "description": "Short labels per app: the site in a browser, the project in an editor, what runs in a terminal. Never a window's title; never private windows or password managers. Off until you turn it on."
+      },
+      {
+        "key": "pageSites",
+        "type": "string",
+        "label": "Keep pages for these sites",
+        "defaultValue": "",
+        "description": "Sites, comma separated, whose page (a video, a repository) is kept as well as their name, for example YouTube, GitHub. Set them in the panel."
+      },
+      {
+        "key": "neverApps",
+        "type": "string",
+        "label": "Never describe these apps",
+        "defaultValue": "",
+        "description": "App classes, comma separated, whose details are never kept. Their time still counts."
       }
     ]
   }

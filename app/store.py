@@ -86,6 +86,54 @@ def append(sub: str, name: str, record) -> None:
         os.close(fd)
 
 
+def rewrite(sub: str, name: str, records: list) -> None:
+    """Replace a file with these records: written to a random exclusive temporary file in the same directory,
+    synced, then renamed over the old one, so a crash leaves either the old file or the new one, never half."""
+    import secrets
+    data = "".join(json.dumps(r, separators=(",", ":"), ensure_ascii=True) + "\n" for r in records).encode("ascii")
+    if len(data) > DAY_MAX:
+        raise Unsafe(f"{sub}/{name}: too large to rewrite")
+    d = dir_fd(sub)
+    tmp = f".{name}.{secrets.token_hex(8)}.tmp"
+    try:
+        try:
+            info = os.stat(name, dir_fd=d, follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                raise Unsafe(f"{sub}/{name}: not a regular file of ours")
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=d)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.rename(tmp, name, src_dir_fd=d, dst_dir_fd=d)
+        tmp = ""
+        os.fsync(d)
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp, dir_fd=d)
+            except OSError:
+                pass
+        os.close(d)
+
+
+def names(sub: str) -> list[str]:
+    """The dated files in a subdirectory."""
+    try:
+        d = dir_fd(sub, create=False)
+    except (OSError, Unsafe):
+        return []
+    try:
+        return sorted(n for n in os.listdir(d) if DATED.match(n))
+    finally:
+        os.close(d)
+
+
 def read_lines(sub: str, name: str, ceiling: int = DAY_MAX) -> list:
     """Every JSON line of a file that parses; a missing file is no lines."""
     try:

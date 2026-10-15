@@ -5,6 +5,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "DetailModel.js" as Detail
 
 // Hourglass's panel: the day or the week at the laptop, by hour, by category and by app, how often you came back to
 // it, and the limits you set. Held by the shell as an overlay so it outlives the bar widget's rebuilds; no text
@@ -17,6 +18,38 @@ Item {
   property var hourglass: null
   property bool opened: false
   property string range: "today"
+  // Which apps' rows are open to show what was done in them.
+  property var expanded: ({})
+
+  function toggleApp(app) {
+    var next = Object.assign({}, overlay.expanded)
+    next[app] = !next[app]
+    overlay.expanded = next
+  }
+
+  // Sites seen in the details shown, for choosing which keep their pages.
+  readonly property var sitesSeen: {
+    var out = []
+    var add = function (s) { if (s && out.indexOf(s) < 0 && out.length < 12) out.push(s) }
+    var lists = overlay.r ? [overlay.r.today.apps, overlay.r.week.apps] : []
+    for (var i = 0; i < lists.length; i++)
+      for (var j = 0; j < lists[i].length; j++) {
+        if (Detail.kind(lists[i][j].app) !== "browser") continue
+        var det = lists[i][j].details || []
+        for (var k = 0; k < det.length; k++)
+          if (det[k].label !== "Other" && det[k].label !== "Other sites") add(det[k].label.split(": ")[0])
+      }
+    var chosen = overlay.hourglass ? overlay.hourglass.pageSites : []
+    for (var c = 0; c < chosen.length; c++) add(chosen[c])
+    return out
+  }
+
+  function toggleSite(site) {
+    var list = overlay.hourglass.pageSites.slice()
+    var at = list.indexOf(site)
+    if (at >= 0) list.splice(at, 1); else list.push(site)
+    overlay.hourglass.save({ pageSites: list.join(", ") })
+  }
 
   readonly property string pluginId: "reidenxerx.hourglass"
 
@@ -328,29 +361,68 @@ Item {
 
           Repeater {
             model: overlay.appList.slice(0, 8)
-            delegate: RowLayout {
+            delegate: ColumnLayout {
+              id: appRow
               required property var modelData
+              readonly property var details: modelData.details || []
+              readonly property bool open: overlay.expanded[modelData.app] === true
               Layout.fillWidth: true
-              spacing: Style.space(10)
-              Rectangle {
-                width: Style.space(8); height: width; radius: width / 2
-                color: overlay.categoryColor(modelData.category)
-              }
-              Text {
+              spacing: Style.space(3)
+
+              RowLayout {
                 Layout.fillWidth: true
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                text: modelData.name
-                color: overlay.ink
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
+                spacing: Style.space(10)
+                Rectangle {
+                  width: Style.space(8); height: width; radius: width / 2
+                  color: overlay.categoryColor(appRow.modelData.category)
+                }
+                Text {
+                  Layout.fillWidth: true
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  text: appRow.modelData.name + (appRow.details.length ? (appRow.open ? "  ⌄" : "  ›") : "")
+                  color: overlay.ink
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  MouseArea {
+                    anchors.fill: parent
+                    enabled: appRow.details.length > 0
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: overlay.toggleApp(appRow.modelData.app)
+                  }
+                }
+                Text {
+                  textFormat: Text.PlainText
+                  text: overlay.spell(appRow.modelData.seconds)
+                  color: overlay.ink
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                }
               }
-              Text {
-                textFormat: Text.PlainText
-                text: overlay.spell(modelData.seconds)
-                color: overlay.ink
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
+
+              Repeater {
+                model: appRow.open ? appRow.details : []
+                delegate: RowLayout {
+                  required property var modelData
+                  Layout.fillWidth: true
+                  Layout.leftMargin: Style.space(18)
+                  Text {
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    text: modelData.label
+                    color: overlay.faint
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                  Text {
+                    textFormat: Text.PlainText
+                    text: overlay.spell(modelData.seconds)
+                    color: overlay.faint
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                }
               }
             }
           }
@@ -478,11 +550,66 @@ Item {
             }
           }
 
+          RowLayout {
+            Layout.fillWidth: true
+            Text {
+              Layout.fillWidth: true
+              textFormat: Text.PlainText
+              text: "Remember what you did in each app"
+              color: overlay.ink
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+            ToggleSwitch {
+              checked: overlay.hourglass ? overlay.hourglass.details : false
+              foreground: overlay.ink
+              accent: overlay.accent
+              onToggled: overlay.hourglass.save({ details: !overlay.hourglass.details })
+            }
+          }
+
+          Text {
+            Layout.fillWidth: true
+            visible: overlay.hourglass !== null && overlay.hourglass.details
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            text: "Keep the page, not just the site, for:"
+            color: overlay.faint
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+          }
+
+          Flow {
+            Layout.fillWidth: true
+            visible: overlay.hourglass !== null && overlay.hourglass.details
+            spacing: Style.space(6)
+            Repeater {
+              model: overlay.sitesSeen
+              delegate: Button {
+                required property string modelData
+                text: modelData
+                bordered: true
+                selected: overlay.hourglass.pageSites.indexOf(modelData) >= 0
+                foreground: overlay.ink
+                accent: overlay.accent
+                onClicked: overlay.toggleSite(modelData)
+              }
+            }
+            Button {
+              text: "Forget details"
+              foreground: overlay.faint
+              accent: overlay.accent
+              onClicked: overlay.hourglass.forgetDetails()
+            }
+          }
+
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            text: "Only which app was in front and for how long is kept, on this laptop: never window titles, never pages."
+            text: overlay.hourglass && overlay.hourglass.details
+              ? "Details are short labels such as YouTube, a project in your editor or what runs in a terminal, never a window's title. Private windows and password managers are never described."
+              : "Only which app was in front and for how long is kept, on this laptop: never window titles, never pages."
             color: overlay.faint
             font.family: Style.font.family
             font.pixelSize: Style.font.caption

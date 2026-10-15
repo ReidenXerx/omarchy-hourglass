@@ -67,6 +67,37 @@ class Day(unittest.TestCase):
         self.assertEqual((d["total"], d["pickups"], d["longest"], d["firstPickup"]), (0, 0, None, None))
 
 
+class Details(unittest.TestCase):
+    def test_labels_are_carried_and_only_significant_ones_shown(self):
+        recs = [{"a": "brave", "s": h(9), "e": h(9, 40), "d": "YouTube"},
+                {"a": "brave", "s": h(9, 40), "e": h(10, 20), "d": "GitHub"},
+                {"a": "brave", "s": h(10, 20), "e": h(10, 21), "d": "Some blog"},
+                {"a": "brave", "s": h(10, 21), "e": h(10, 30)},
+                {"a": "zed", "s": h(11), "e": h(11, 5), "d": "omarchy-dusk"}]
+        recs = [core.read_stretch(r, NOW) for r in recs]
+        d = core.summarise_day(recs, T0, T0 + 86400, plain)
+        brave = [a for a in d["apps"] if a["app"] == "brave"][0]
+        self.assertEqual([(x["label"], x["seconds"]) for x in brave["details"]],
+                         [("GitHub", 2400), ("YouTube", 2400), ("Other", 600)])
+        zed = [a for a in d["apps"] if a["app"] == "zed"][0]
+        self.assertEqual(zed["details"], [{"label": "omarchy-dusk", "seconds": 300}], "a tenth of its app's time")
+
+    def test_bad_labels_are_dropped_not_the_stretch(self):
+        r = core.read_stretch({"a": "brave", "s": h(9), "e": h(9, 1), "d": "x" * 500}, NOW)
+        self.assertEqual(r, {"a": "brave", "s": h(9), "e": h(9, 1)})
+        r = core.read_stretch({"a": "brave", "s": h(9), "e": h(9, 1), "d": 42}, NOW)
+        self.assertNotIn("d", r)
+
+    def test_details_survive_into_the_week(self):
+        today = core.summarise_day([core.read_stretch({"a": "zed", "s": h(9), "e": h(10), "d": "bearing"}, NOW)],
+                                   T0, T0 + 86400, plain)
+        saved = core.read_totals(core.day_totals(today, DAY.isoformat()))
+        self.assertEqual(saved["det"], {"zed": {"bearing": 3600}})
+        w = core.week([dict(saved, d=(DAY - dt.timedelta(days=1)).isoformat())], today, DAY.isoformat())
+        self.assertEqual(w["apps"][0]["details"], [{"label": "bearing", "seconds": 7200}])
+        self.assertEqual(core.without_details({"a": "zed", "s": 1, "e": 2, "d": "x"}), {"a": "zed", "s": 1, "e": 2})
+
+
 class Week(unittest.TestCase):
     def test_week_average_and_comparison(self):
         totals = [{"d": (DAY - dt.timedelta(days=k)).isoformat(), "t": 3600 * (k % 3 + 1), "p": 5,
@@ -147,6 +178,26 @@ class Helper(unittest.TestCase):
             self.assertEqual(apps_today["brave"], 60, "only the part after midnight counts today")
         self.assertEqual(rep["limits"][0]["used"], 540)
         self.assertEqual(rep["today"]["pickups"], 1)
+
+    def test_forget_details_keeps_the_times(self):
+        now = int(time.time())
+        lines = [{"a": "brave-browser", "s": now - 900, "e": now - 60, "d": "YouTube"}]
+        self.run_helper("add", stdin=(json.dumps(lines) + "\n").encode())
+        rep = json.loads(self.run_helper("report").stdout)
+        self.assertEqual(rep["today"]["apps"][0]["details"][0]["label"], "YouTube")
+        self.assertNotIn("raw", rep["today"]["apps"][0], "only significant details leave the helper")
+        self.assertEqual(self.run_helper("forget-details").returncode, 0)
+        rep = json.loads(self.run_helper("report").stdout)
+        self.assertEqual(rep["today"]["apps"][0]["seconds"], 840)
+        self.assertEqual(rep["today"]["apps"][0]["details"], [])
+        day = pathlib.Path(self.tmp.name, "hourglass", "days")
+        self.assertNotIn("YouTube", "".join(p.read_text() for p in day.iterdir()))
+        self.assertEqual([p.name for p in day.iterdir() if p.name.startswith(".")], [], "no temporary file left")
+
+    def test_probe_refuses_nonsense_and_says_nothing_for_a_stranger(self):
+        self.assertEqual(self.run_helper("probe", "abc").returncode, 1)
+        out = self.run_helper("probe", "1")
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, b""))
 
     def test_too_much_input_is_refused(self):
         out = self.run_helper("add", stdin=b"x" * (300 * 1024))

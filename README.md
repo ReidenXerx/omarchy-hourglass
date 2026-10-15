@@ -20,8 +20,18 @@ nudge rather than lock.
 - **Limits that nudge.** A daily allowance for an app or a whole category, with
   a notice five minutes before and when it is used up. It never closes or
   blocks anything.
-- **Private by construction.** Only which app was in front and for how long is
-  kept, never window titles or pages, in a private directory on your laptop.
+- **What you did, when you want it.** Turn details on and each app opens to
+  show what the time went on: the site in a browser (and the page, for sites
+  you choose, such as a YouTube video or a GitHub repository), the project in
+  your editor, the program and folder in a terminal ("Claude Code in
+  omarchy-dusk"), read from what runs there rather than its title. Only
+  significant entries are shown: ten minutes, or a tenth of the app's time, and
+  the rest as one "Other" line.
+- **Private by construction.** Details are off until you turn them on, and are
+  only ever short labels, never a window's title. Private windows and password
+  managers are never described, you can name apps that never are, and "Forget
+  details" takes every label out of the history while keeping the times. All of
+  it stays in a private directory on your laptop.
 
 ## Using it
 

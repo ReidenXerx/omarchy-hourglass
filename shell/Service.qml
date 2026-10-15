@@ -2,6 +2,8 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
+import "DetailModel.js" as Detail
 
 // Hourglass's service: notices which app is in front while you are at the keyboard, and hands the time to the helper
 // once a minute.
@@ -32,6 +34,11 @@ Item {
   property var entry: null
   readonly property string limits: hourglass.entry && typeof hourglass.entry.limits === "string" ? hourglass.entry.limits.slice(0, 2000) : ""
   readonly property bool weeklySummary: !hourglass.entry || hourglass.entry.weeklySummary !== false
+  // Details are off until you turn them on. Then only a short label is kept, never a title (DetailModel.js).
+  readonly property bool details: hourglass.entry !== null && hourglass.entry.details === true
+  readonly property var pageSites: Detail.siteList(hourglass.entry ? hourglass.entry.pageSites : "")
+  readonly property var neverApps: String(hourglass.entry && typeof hourglass.entry.neverApps === "string" ? hourglass.entry.neverApps : "")
+    .toLowerCase().split(",").map(function (a) { return a.trim() }).filter(function (a) { return a.length > 0 }).slice(0, 48)
   readonly property int idleSeconds: {
     var n = hourglass.entry ? Number(hourglass.entry.idleSeconds) : 60
     return isFinite(n) ? Math.max(30, Math.min(600, Math.round(n))) : 60
@@ -72,7 +79,10 @@ Item {
     }
     var payload = { limits: String(next.limits !== undefined ? next.limits : hourglass.limits),
                     weeklySummary: next.weeklySummary !== undefined ? next.weeklySummary === true : hourglass.weeklySummary,
-                    idleSeconds: next.idleSeconds !== undefined ? next.idleSeconds : hourglass.idleSeconds }
+                    idleSeconds: next.idleSeconds !== undefined ? next.idleSeconds : hourglass.idleSeconds,
+                    details: next.details !== undefined ? next.details === true : hourglass.details,
+                    pageSites: next.pageSites !== undefined ? String(next.pageSites) : hourglass.pageSites.join(", "),
+                    neverApps: next.neverApps !== undefined ? String(next.neverApps) : hourglass.neverApps.join(", ") }
     hourglass.shell.updateEntryInline(hourglass.pluginId, payload)
     hourglass.message = ""
     return true
@@ -84,6 +94,71 @@ Item {
   readonly property string appClass: {
     var c = hourglass.focused ? String(hourglass.focused.appId || "").trim().slice(0, 64) : ""
     return /^[A-Za-z0-9][A-Za-z0-9 ._+:@-]*$/.test(c) ? c : ""
+  }
+
+  // What the label for the window in front is: from its title for browsers and editors, from what runs in it for
+  // terminals (the helper's probe), nothing for apps you listed or for private windows.
+  readonly property string title: hourglass.focused ? String(hourglass.focused.title || "").slice(0, 512) : ""
+  readonly property string kind: Detail.kind(hourglass.appClass)
+  readonly property bool describable: hourglass.details && hourglass.appClass !== ""
+    && hourglass.neverApps.indexOf(hourglass.appClass.toLowerCase()) < 0
+  property string terminalLabel: ""
+  readonly property string detailLabel: !hourglass.describable ? ""
+    : hourglass.kind === "terminal" ? hourglass.terminalLabel
+    : Detail.label(hourglass.appClass, hourglass.title, hourglass.pageSites)
+
+  onDetailLabelChanged: {
+    var now = Date.now()
+    if (hourglass.current && hourglass.current.d !== hourglass.detailLabel) {
+      hourglass.closeAt(now)
+      hourglass.openAt(now)
+    }
+  }
+
+  function probeTerminal() {
+    if (!hourglass.describable || hourglass.kind !== "terminal" || prober.running) return
+    Hyprland.refreshToplevels()
+    var top = Hyprland.activeToplevel
+    var pid = top && top.lastIpcObject ? Number(top.lastIpcObject.pid) : 0
+    if (!(pid > 0)) { hourglass.terminalLabel = ""; return }
+    prober.command = ["/usr/bin/python3", "-I", hourglass.helper, "probe", String(Math.floor(pid))]
+    prober.running = true
+    deadline.restart()
+  }
+
+  Process {
+    id: prober
+    clearEnvironment: true
+    environment: hourglass.helperEnv
+    stdout: StdioCollector {
+      onStreamFinished: hourglass.terminalLabel = Detail.clip(text.split("\n")[0])
+    }
+  }
+
+  // While a terminal is in front, what runs in it is looked at again every twenty seconds.
+  Timer {
+    interval: 20000
+    repeat: true
+    running: hourglass.describable && hourglass.kind === "terminal" && !hourglass.away
+    triggeredOnStart: true
+    onTriggered: hourglass.probeTerminal()
+  }
+
+  function forgetDetails() {
+    if (forgetter.running) return
+    forgetter.running = true
+    deadline.restart()
+  }
+
+  Process {
+    id: forgetter
+    command: ["/usr/bin/python3", "-I", hourglass.helper, "forget-details"]
+    clearEnvironment: true
+    environment: hourglass.helperEnv
+    onExited: function (code) {
+      hourglass.message = code === 0 ? "" : "Hourglass could not forget the details."
+      hourglass.refresh()
+    }
   }
 
   IdleMonitor {
@@ -104,11 +179,14 @@ Item {
     var c = hourglass.current
     hourglass.current = null
     if (!c || endMs - c.start < 2000) return
-    hourglass.pending = hourglass.pending.concat([{ a: c.app, s: Math.floor(c.start / 1000), e: Math.floor(endMs / 1000) }])
+    var stretch = { a: c.app, s: Math.floor(c.start / 1000), e: Math.floor(endMs / 1000) }
+    if (c.d) stretch.d = c.d
+    hourglass.pending = hourglass.pending.concat([stretch])
   }
 
   function openAt(startMs) {
-    if (hourglass.appClass && !hourglass.away) hourglass.current = { app: hourglass.appClass, start: startMs }
+    if (hourglass.appClass && !hourglass.away)
+      hourglass.current = { app: hourglass.appClass, start: startMs, d: hourglass.detailLabel }
   }
 
   function back(nowMs) {
@@ -119,6 +197,7 @@ Item {
 
   onAppClassChanged: {
     var now = Date.now()
+    hourglass.terminalLabel = ""
     hourglass.closeAt(now)
     hourglass.openAt(now)
   }
@@ -170,7 +249,7 @@ Item {
       var now = Date.now()
       var app = hourglass.current.app
       hourglass.closeAt(now)
-      if (!hourglass.away && app === hourglass.appClass) hourglass.current = { app: app, start: now }
+      if (!hourglass.away && app === hourglass.appClass) hourglass.current = { app: app, start: now, d: hourglass.detailLabel }
     }
     if (hourglass.pending.length === 0 || adder.running) return
     adder.payload = JSON.stringify(hourglass.pending.slice(0, 2000))
