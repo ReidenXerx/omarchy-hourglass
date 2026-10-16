@@ -151,12 +151,28 @@ Item {
     onTriggered: hourglass.probeTerminal()
   }
 
+  function withoutLabels(list) {
+    return list.map(function (r) { var c = Object.assign({}, r); delete c.d; return c })
+  }
+
+  // Writes and forgetting take turns: a batch being written when you ask may still carry labels, so the forgetting
+  // runs once it is on disk, and no batch starts while the forgetting rewrites the files.
+  property bool forgetAfterWrite: false
+  property bool forgetAgain: false
+
   function forgetDetails() {
-    // What is still waiting to be written goes without its labels too.
-    hourglass.pending = hourglass.pending.map(function (r) { var c = Object.assign({}, r); delete c.d; return c })
+    // What is still waiting to be written goes without its labels too, the kept copy of the batch being written
+    // included, so a failed write cannot put them back.
+    hourglass.pending = hourglass.withoutLabels(hourglass.pending)
+    adder.batch = hourglass.withoutLabels(adder.batch)
     if (hourglass.current) hourglass.current = { app: hourglass.current.app, start: hourglass.current.start, d: "" }
-    if (forgetter.running) return
-    forgetter.running = true
+    if (adder.running) hourglass.forgetAfterWrite = true
+    else hourglass.runForget()
+  }
+
+  function runForget() {
+    if (forgetter.running) hourglass.forgetAgain = true
+    else forgetter.running = true
   }
 
   Process {
@@ -165,6 +181,11 @@ Item {
     clearEnvironment: true
     environment: hourglass.helperEnv
     onExited: function (code) {
+      if (hourglass.forgetAgain) {
+        hourglass.forgetAgain = false
+        forgetter.running = true
+        return
+      }
       hourglass.message = code === 0 ? "" : "Hourglass could not forget the details."
       hourglass.refresh()
     }
@@ -282,7 +303,7 @@ Item {
         hourglass.current = { app: keep.app, start: cut, d: keep.d }
       }
     }
-    if (hourglass.pending.length === 0 || adder.running) return
+    if (hourglass.pending.length === 0 || adder.running || forgetter.running) return
     adder.batch = hourglass.pending.slice(0, 2000)
     hourglass.pending = hourglass.pending.slice(2000)
     adder.payload = JSON.stringify(adder.batch)
@@ -305,6 +326,10 @@ Item {
       // A batch the helper did not take is kept for the next flush, not lost.
       if (code !== 0) hourglass.pending = adder.batch.concat(hourglass.pending).slice(0, 5000)
       adder.batch = []
+      if (hourglass.forgetAfterWrite) {
+        hourglass.forgetAfterWrite = false
+        hourglass.runForget()
+      }
       if (hourglass.panelOpen) hourglass.refresh()
     }
   }
