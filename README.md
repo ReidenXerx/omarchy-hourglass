@@ -97,7 +97,7 @@ have been idle, keeps the history in the same private
 ## Requirements
 
 Omarchy's Quickshell-based shell, Python 3 and `notify-send` for limit notices.
-On Plasma: Plasma 6, systemd, Python 3 with PyGObject (`python-gobject`).
+On Plasma: Plasma 6, systemd, Python 3 with PyGObject (`python-gobject`), and `notify-send` (libnotify) for limit notices.
 
 ## Tests
 

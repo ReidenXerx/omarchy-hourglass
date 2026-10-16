@@ -208,11 +208,11 @@ PlasmaExtras.Representation {
         id: chart
         Layout.fillWidth: true
         Layout.preferredHeight: Kirigami.Units.gridUnit * 6
-        readonly property var data: view.r
+        readonly property var report: view.r
         readonly property bool weekView: view.week
         readonly property color ink: view.ink
         readonly property color bar: view.accent
-        onDataChanged: requestPaint()
+        onReportChanged: requestPaint()
         onWeekViewChanged: requestPaint()
         onWidthChanged: requestPaint()
         onInkChanged: requestPaint()
@@ -221,7 +221,7 @@ PlasmaExtras.Representation {
         onPaint: {
           var c = getContext("2d")
           c.reset()
-          var d = chart.data
+          var d = chart.report
           var caption = Math.round(view.smallPt * 4 / 3)
           var bottom = caption + 6
           var h = height - bottom

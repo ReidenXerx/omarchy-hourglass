@@ -91,7 +91,8 @@ class Recorder:
         """What is ready to be written: finished stretches, and the one in progress cut where you were surely here."""
         if self.current:
             cut = now - self.idle_seconds
-            if cut > self.current["s"]:
+            # A cut under two seconds would be dropped as too short, losing that slice: leave it for the next flush.
+            if cut - self.current["s"] >= 2:
                 keep = self.current
                 self._close(cut)
                 self.current = {"a": keep["a"], "s": cut, "d": keep.get("d", "")}

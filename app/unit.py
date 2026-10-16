@@ -10,6 +10,7 @@ import pathlib
 import secrets
 import stat
 import subprocess
+import sys
 
 UNIT = "app.duduphudu.hourglass.service"
 SYSTEMCTL = "/usr/bin/systemctl"
@@ -84,8 +85,23 @@ def _systemctl(*args: str) -> int:
 
 
 def install() -> int:
-    _write(unit_dir() / UNIT, unit_text())
+    """0 when the recorder service is set up and started; otherwise 1, with the reason on stderr."""
+    # The service starts and then fails in the background if the system Python lacks PyGObject: find out first.
+    try:
+        probe = subprocess.run(["/usr/bin/python3", "-I", "-c", "import gi"], timeout=20,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        probe = None
+    if probe is None or probe.returncode != 0:
+        print("The recorder needs PyGObject for the system Python (python-gobject, python3-gi).", file=sys.stderr)
+        return 1
+    try:
+        _write(unit_dir() / UNIT, unit_text())
+    except (OSError, ValueError) as problem:
+        print(f"The recorder's service file could not be written: {problem}", file=sys.stderr)
+        return 1
     if _systemctl("daemon-reload") != 0:
+        print("systemd did not reload.", file=sys.stderr)
         return 1
     return _systemctl("enable", "--now", UNIT)
 

@@ -18,7 +18,7 @@ PlasmoidItem {
   id: root
 
   readonly property string service: "app.duduphudu.Hourglass"
-  readonly property string helper: String(Qt.resolvedUrl("../code/bin/hourglass")).replace("file://", "")
+  readonly property string helper: decodeURIComponent(String(Qt.resolvedUrl("../code/bin/hourglass")).replace("file://", ""))
 
   readonly property bool recording: watcher.registered
   property var report: null
@@ -80,9 +80,20 @@ PlasmoidItem {
 
   function startRecording() {
     root.message = "Starting the recorder…"
-    root.run("/usr/bin/python3 -I " + root.quote(root.helper) + " install-service", function (code) {
-      root.message = code === 0 ? "" : "The recorder could not be started. It needs systemd and Python 3."
+    root.run("/usr/bin/timeout 60 /usr/bin/python3 -I " + root.quote(root.helper) + " install-service 2>&1", function (code, out) {
+      if (code !== 0) {
+        root.message = (out.trim().split("\n").pop() || "The recorder could not be started.").slice(0, 200)
+        return
+      }
+      startCheck.restart()
     })
+  }
+
+  // systemd reports success as soon as the service is started; whether it stayed up shows on the bus.
+  Timer {
+    id: startCheck
+    interval: 8000
+    onTriggered: root.message = root.recording ? "" : "The recorder started and stopped again. It needs PyGObject for the system Python (python-gobject)."
   }
 
   function stopRecording() {
@@ -126,7 +137,8 @@ PlasmoidItem {
     var kind = Detail.kind(app)
     var label = describable && kind !== "terminal" ? Detail.label(app, title, root.pageSites) : ""
     var terminal = describable && kind === "terminal"
-    root.appNow = app
+    // The open panel is never a task, so with it open there is no app in front: keep the last real one.
+    if (app !== "") root.appNow = app
     var key = app + "|" + label + "|" + terminal + "|" + pid
     if (!force && key === root.lastSent) return
     root.lastSent = key
@@ -158,12 +170,14 @@ PlasmoidItem {
   }
 
   Timer {
-    interval: root.expanded ? 60000 : 120000
+    interval: 60000
     repeat: true
     running: root.recording
     triggeredOnStart: true
     onTriggered: {
       root.nowMs = Date.now()
+      // A heartbeat as well: the recorder stops counting an app when the widget has been silent for three minutes.
+      root.sendFocus(true)
       root.refresh()
       var d = new Date()
       if (Plasmoid.configuration.weeklySummary && d.getDay() === 0 && d.getHours() >= 20)
