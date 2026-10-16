@@ -1,0 +1,15 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Authors": [{ "Name": "DuduPhudu", "Email": "" }],
+    "Category": "System Information",
+    "Description": "Screen time, the way a phone shows it: today and the week by app and category, pick-ups, and daily limits that nudge. Counts only while you are at the keyboard; keeps no window titles.",
+    "Icon": "chronometer",
+    "Id": "app.duduphudu.hourglass",
+    "License": "MIT",
+    "Name": "Hourglass",
+    "Version": "1.1.0",
+    "Website": "https://duduphudu.app/plugins/hourglass/"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}

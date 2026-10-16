@@ -9,30 +9,24 @@
   hourglass probe PID           print what runs in the terminal window whose process is PID
   hourglass forget-details      take every detail label out of the history, keeping the times
   hourglass told KEY            remember that the notice KEY was given today, so a restart does not repeat it
+  hourglass serve               the Plasma edition's recorder: a session-bus service the widget talks to
+  hourglass install-service     set the recorder up as a user service that starts with the desktop (Plasma)
+  hourglass remove-service      take that service away again
 """
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import pathlib
 import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "app"))
-import apps  # noqa: E402
-import core  # noqa: E402
-import store  # noqa: E402
+import history  # noqa: E402
 import terminal  # noqa: E402
 
 STDIN_MAX = 256 * 1024
-re_key = __import__("re").compile(r"^(app|cat):[A-Za-z0-9 ._+:@-]{1,64}\|(five|done)$")
-KEEP_DAYS = 30
-SUMMARY_DAYS = 40      # how far back a missing day summary is filled in
-
-
 def add() -> int:
-    now = time.time()
     raw = sys.stdin.buffer.readline(STDIN_MAX + 1)
     if len(raw) > STDIN_MAX:
         print("hourglass: too much input", file=sys.stderr)
@@ -44,130 +38,29 @@ def add() -> int:
         return 1
     if not isinstance(batch, list):
         return 1
-    for item in batch[:5000]:
-        r = core.read_stretch(item, now)
-        if r is None:
-            continue
-        if "p" in r:
-            store.append("days", store.day_name(r["p"]), r)
-            continue
-        # A stretch across midnight is kept as two, one in each day's file.
-        s, e = r["s"], r["e"]
-        while s < e:
-            next_midnight = int(dt.datetime.combine(dt.date.fromtimestamp(s) + dt.timedelta(days=1), dt.time()).timestamp())
-            cut = min(e, next_midnight)
-            part = {"a": r["a"], "s": s, "e": cut}
-            if r.get("d"):
-                part["d"] = r["d"]
-            store.append("days", store.day_name(s), part)
-            s = cut
-    summarise_past(now)
-    store.prune("days", KEEP_DAYS, dt.date.fromtimestamp(now))
-    store.prune("totals", 800, dt.date.fromtimestamp(now))
+    history.keep(batch, time.time())
     return 0
 
 
-def day_records(day: dt.date, now: float) -> list[dict]:
-    rows = store.read_lines("days", day.isoformat() + ".jsonl")
-    return [r for r in (core.read_stretch(x, now) for x in rows) if r]
-
-
-def all_totals(now: float) -> list[dict]:
-    year = dt.date.fromtimestamp(now).year
-    rows = store.read_lines("totals", f"{year - 1}.jsonl", 2 * 1024 * 1024) + \
-        store.read_lines("totals", f"{year}.jsonl", 2 * 1024 * 1024)
-    out = {}
-    for r in rows:
-        t = core.read_totals(r)
-        if t:
-            out[t["d"]] = t
-    return list(out.values())
-
-
-def summarise_past(now: float) -> None:
-    """Keep a year of days: summarise each finished day that has no summary yet."""
-    done = {t["d"] for t in all_totals(now)}
-    today = dt.date.fromtimestamp(now)
-    resolve = apps.Resolver()
-    for k in range(SUMMARY_DAYS, 0, -1):
-        day = today - dt.timedelta(days=k)
-        if day.isoformat() in done:
-            continue
-        records = day_records(day, now)
-        if not records:
-            continue
-        start = int(dt.datetime.combine(day, dt.time()).timestamp())
-        summary = core.summarise_day(records, start, start + 86400 + 3600, resolve)
-        store.append("totals", f"{day.year}.jsonl", core.day_totals(summary, day.isoformat()))
-
-
 def report(limits_text: str) -> int:
-    now = time.time()
-    today = dt.date.fromtimestamp(now)
-    start = int(dt.datetime.combine(today, dt.time()).timestamp())
-    resolve = apps.Resolver()
-    day = core.summarise_day(day_records(today, now), start, int(now) + 1, resolve)
-    totals = all_totals(now)
-    avg = core.average(totals, today.isoformat())
-    w = core.week(totals, day, today.isoformat())
-    for a in w["apps"]:
-        info = resolve(a["app"])
-        a["name"], a["category"] = info["name"], info["category"]
-    for a in day["apps"]:
-        a.pop("raw", None)      # only the significant details leave the helper
-    limits = core.limit_use(core.parse_limits(limits_text), day)
-    for x in limits:
-        x["name"] = resolve(x["key"])["name"] if x["kind"] == "app" else x["key"]
-    told = sorted({r["k"] for r in store.read_lines("state", "told.jsonl", 256 * 1024)
-                   if isinstance(r, dict) and r.get("d") == today.isoformat() and isinstance(r.get("k"), str)})[:100]
-    out = {"now": int(now), "today": day, "average": round(avg) if avg is not None else None, "week": w,
-           "limits": limits, "categories": core.CATEGORIES, "told": told}
-    print(json.dumps(out, separators=(",", ":"), ensure_ascii=True))
+    print(json.dumps(history.build_report(limits_text, time.time()), separators=(",", ":"), ensure_ascii=True))
     return 0
 
 
 def weekly() -> int:
-    now = time.time()
-    d = dt.datetime.fromtimestamp(now)
-    if d.isoweekday() != 7 or d.hour < 20:
-        return 0
-    week_id = f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}"
-    sent = {r.get("w") for r in store.read_lines("state", "weekly.jsonl", 64 * 1024) if isinstance(r, dict)}
-    if week_id in sent:
-        return 0
-    today = d.date()
-    start = int(dt.datetime.combine(today, dt.time()).timestamp())
-    resolve = apps.Resolver()
-    day = core.summarise_day(day_records(today, now), start, int(now) + 1, resolve)
-    w = core.week(all_totals(now), day, today.isoformat())
-    if w["total"] <= 0:
-        return 0
-    for a in w["apps"]:
-        a["app"] = resolve(a["app"])["name"]
-    store.append("state", "weekly.jsonl", {"w": week_id})
-    print(core.weekly_text(w))
+    line = history.weekly_due(time.time())
+    if line:
+        print(line)
     return 0
 
 
 def forget_details() -> int:
-    for sub in ("days", "totals"):
-        key = "d" if sub == "days" else "det"
-        for name in store.names(sub):
-            rows = store.read_lines(sub, name, 2 * 1024 * 1024 if sub == "totals" else store.DAY_MAX)
-            if any(isinstance(r, dict) and key in r for r in rows):
-                store.rewrite(sub, name, [core.without_details(r, sub) for r in rows])
+    history.forget_details()
     return 0
 
 
 def told(key: str) -> int:
-    if not re_key.match(key):
-        return 1
-    today = dt.date.today().isoformat()
-    rows = store.read_lines("state", "told.jsonl", 256 * 1024)
-    kept = [r for r in rows if isinstance(r, dict) and r.get("d") == today]
-    if not any(r.get("k") == key for r in kept):
-        store.rewrite("state", "told.jsonl", kept[-200:] + [{"d": today, "k": key}])
-    return 0
+    return 0 if history.told(key) else 1
 
 
 def probe(pid: str) -> int:
@@ -187,9 +80,18 @@ def main(argv: list[str]) -> int:
     pr = sub.add_parser("probe")
     pr.add_argument("pid")
     sub.add_parser("forget-details")
+    sub.add_parser("serve")
+    sub.add_parser("install-service")
+    sub.add_parser("remove-service")
     tl = sub.add_parser("told")
     tl.add_argument("key")
     args = parser.parse_args(argv)
+    if args.cmd == "serve":
+        import service
+        return service.run()
+    if args.cmd in ("install-service", "remove-service"):
+        import unit
+        return unit.install() if args.cmd == "install-service" else unit.remove()
     if args.cmd == "told":
         return told(args.key[:120])
     if args.cmd == "probe":

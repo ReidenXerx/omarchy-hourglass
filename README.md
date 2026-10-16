@@ -73,14 +73,38 @@ omarchy plugin remove reidenxerx.hourglass
 
 Your history stays in `~/.local/state/hourglass` until you delete it.
 
+## On KDE Plasma
+
+Hourglass also comes as a Plasma 6 widget, with the same panel, limits and
+details, drawn with Plasma's own controls and colours. Install it from the KDE
+Store (Add Widgets → Get New Widgets → search "Hourglass"), or build it here:
+
+```bash
+tools/build-plasma          # dist/hourglass.plasmoid
+kpackagetool6 -t Plasma/Applet -i dist/app.duduphudu.hourglass
+```
+
+A Plasma widget cannot keep a clock or write files, so the first time you open
+it, it offers **Start recording**: that sets up a small recorder (the same
+Python helper, `hourglass serve`) as a systemd user service on your session
+bus. The widget tells it which app is in front, using Plasma's task manager,
+and, if you turned details on, a short label it derived from the window title.
+The title itself never leaves the widget. The recorder asks Plasma how long you
+have been idle, keeps the history in the same private
+`~/.local/state/hourglass`, and sends limit notices as Plasma notifications.
+**Stop recording** in the panel removes the service again.
+
 ## Requirements
 
 Omarchy's Quickshell-based shell, Python 3 and `notify-send` for limit notices.
+On Plasma: Plasma 6, systemd, Python 3 with PyGObject (`python-gobject`).
 
 ## Tests
 
 ```bash
 python3 -I tests/core_test.py
+python3 -I tests/recorder_test.py
+node tests/detail-test.js
 ```
 
 ## Licence

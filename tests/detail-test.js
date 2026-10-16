@@ -53,6 +53,10 @@ test("private windows and password managers are never described", () => {
   eq(M.isPrivate("firefox", "Something — Mozilla Firefox Private Browsing"), true)
   eq(M.label("Bitwarden", "Bitwarden", []), "")
   eq(M.kind("org.keepassxc.KeePassXC"), "never")
+  // Plasma names apps by their desktop file
+  eq(M.kind("org.kde.konsole"), "terminal")
+  eq(M.kind("org.kde.kwalletmanager"), "never")
+  eq(M.label("org.kde.falkon", "Videos - YouTube - Falkon", []), "YouTube")
 })
 
 test("editors give their project; terminals and other apps give nothing here", () => {

@@ -8,11 +8,15 @@
 var LABEL_MAX = 60
 
 var BROWSERS = ["brave-browser", "firefox", "chromium", "google-chrome", "zen", "vivaldi-stable", "librewolf",
-                "org.mozilla.firefox", "com.brave.browser", "microsoft-edge", "epiphany", "org.gnome.epiphany"]
+                "org.mozilla.firefox", "com.brave.browser", "microsoft-edge", "epiphany", "org.gnome.epiphany",
+                // The ids Plasma knows them by (desktop files, Flatpak included).
+                "org.chromium.chromium", "com.google.chrome", "app.zen_browser.zen", "io.gitlab.librewolf-community",
+                "com.vivaldi.vivaldi", "com.microsoft.edge", "org.kde.falkon", "falkon"]
 var EDITORS = ["dev.zed.zed", "zed", "code", "code-oss", "vscodium", "cursor"]
 var TERMINALS = ["foot", "kitty", "alacritty", "com.mitchellh.ghostty", "org.wezfurlong.wezterm", "dev.warp.warp",
-                 "org.gnome.console", "konsole", "xterm"]
-var NEVER = ["bitwarden", "1password", "org.keepassxc.keepassxc", "keepassxc", "seahorse", "org.gnome.seahorse"]
+                 "org.gnome.console", "konsole", "xterm", "org.kde.konsole", "org.kde.yakuake", "yakuake"]
+var NEVER = ["bitwarden", "1password", "org.keepassxc.keepassxc", "keepassxc", "seahorse", "org.gnome.seahorse",
+             "com.bitwarden.desktop", "org.kde.kwalletmanager", "kwalletmanager5", "org.kde.keysmith"]
 
 // The site at the end of a page title, as browsers and sites write it. Order matters: specific before general.
 var SITES = [
@@ -54,7 +58,7 @@ function kind(appClass) {
   return "other"
 }
 
-var BROWSER_SUFFIX = /\s+[-—–]\s+(Brave|Mozilla Firefox|Firefox|Chromium|Google Chrome|Zen Browser|Vivaldi|LibreWolf|Microsoft Edge|Web)(\s*\([^()]{0,40}\))?\s*$/
+var BROWSER_SUFFIX = /\s+[-—–]\s+(Brave|Mozilla Firefox|Firefox|Chromium|Google Chrome|Zen Browser|Vivaldi|LibreWolf|Microsoft Edge|Falkon|Web)(\s*\([^()]{0,40}\))?\s*$/
 var PRIVATE = /private browsing|incognito|inprivate|\(private|private window|with tor|[-—–]\s*private\s*$/i
 
 // A browser title without the browser's own name. null when nothing may be said about it: a private window

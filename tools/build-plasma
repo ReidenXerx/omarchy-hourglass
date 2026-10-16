@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Assemble the Plasma widget: the plasma/ package plus the shared core (the helper, its Python and DetailModel.js),
+# into dist/app.duduphudu.hourglass and dist/hourglass.plasmoid.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out="$root/dist/app.duduphudu.hourglass"
+rm -rf -- "${out:?}" "$root/dist/hourglass.plasmoid"
+mkdir -p "$out/contents/code/bin" "$out/contents/code/app"
+cp -r "$root/plasma/." "$out/"
+cp "$root/shell/DetailModel.js" "$out/contents/code/"
+cp "$root/bin/hourglass" "$out/contents/code/bin/"
+cp "$root"/app/*.py "$out/contents/code/app/"
+cp "$root/LICENSE" "$out/" 2>/dev/null || true
+chmod 755 "$out/contents/code/bin/hourglass"
+(cd "$out" && /usr/bin/zip -qr "$root/dist/hourglass.plasmoid" .)
+echo "$out"
