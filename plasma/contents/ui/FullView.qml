@@ -139,6 +139,8 @@ PlasmaExtras.Representation {
       PlasmaComponents.TabBar {
         id: tabs
         Layout.alignment: Qt.AlignTop
+        // Room for both words: left to itself the bar shrinks until "Today" breaks in two.
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 9
         visible: view.hourglass.recording
         currentIndex: view.week ? 1 : 0
         PlasmaComponents.TabButton { text: "Today"; onClicked: view.range = "today" }
